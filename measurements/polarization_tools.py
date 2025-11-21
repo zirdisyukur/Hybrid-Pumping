@@ -27,6 +27,13 @@ gyromagnetic_ratio_K = (bohr_magneton / hbar * g_factor_K).to(ureg.kHz/ureg.uT*u
 
 #temperature and frequency calibration for probe laser at 55mA
 probe_calib = (-35.579346 * ureg.delta_degC / ureg.THz) #
+
+#data below is from fit_absorption_spectrum.ipynb but idk what the probe settings were
+#{'slope': -0.02994121176448456, 'intercept': 389.74896028618315}
+#
+#freq_per_temp = -0.02994121176448456 * ureg.THz / ureg.delta_degC
+#freq_per_temp_b = 389.74896028618315 * ureg.THz
+
 potassium_f0_T = (16.048 * ureg.delta_degC) 
 HWHM = 0.170 * ureg.delta_degC / probe_calib
 rot_calib = 1.1274997 * ureg.V/ureg.deg #at 55mA
