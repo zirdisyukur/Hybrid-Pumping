@@ -205,7 +205,7 @@ class polarization_data():
             ax = plt
         
         if self._fit_result is None:
-            fit_result = pump_fitter.fit( self._Power, self._R, guess=guess)
+            fit_result = fitt.PolarizationPumpFitter().fit( self._Power, self._R, guess=guess)
             self._fit_result = fit_result
 
         polarization = self._fit_result.polarization(self._Power.m)
