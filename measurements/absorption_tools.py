@@ -12,8 +12,13 @@ import one_ring.base.h5py_tools as h5t
 import one_ring.base.fitting_tools as fitt
 from scipy import constants
 
+r_e = constants.physical_constants['classical electron radius'][0] * ureg.m
+c = constants.c * ureg.m / ureg.s
+f_K = 0.338
+f_Rb = 0.004
+
 class absorption_data():
-    def __init__(self,file_name, group_name, style='numpy', data_mask=None):
+    def __init__(self,file_name, group_name, f_osc, style='numpy', data_mask=None):
         """
         Initializes a class representing a absorption measurement. After initializing with
         the appropraite h5 data location, the class has various methods and variable calculations
@@ -39,8 +44,12 @@ class absorption_data():
         self._style = style
         self._data_mask = data_mask
         self._fit_result = None
+        self._fit_params = None
         self._probe_calib_intercept = 389.74896028618315 * ureg.THz
         self._reference_scan = False
+        self._normalized_data = False
+        self._fit_xunit = None
+        self._f_osc = f_osc
         
         if (style == 'pandas'):
             return 'dataframes not usually used for this type of measurment'
@@ -108,7 +117,7 @@ class absorption_data():
         elif (unit == 'freq'):
             return (self._Temperature.to(ureg.degC).m * ureg.delta_degC) * self._probe_calib + self._probe_calib_intercept
 
-    def plot_fit(self, ref, xunit='temp', ax=None, excluded_data=False, dlabel='data', flabel='fit', guess=[0.07,16,0.144,0.05]):
+    def fit_absorption(self, ref, xunit='freq', ax=None, excluded_data=False, dlabel='data', flabel='fit', tlabel='Raw Measurements and Fit', guess=None):
         """
         Function that will help plot the raw data and the best fit.
 
@@ -132,12 +141,23 @@ class absorption_data():
             
         if ax is None:
             ax = plt
+            
+        if (guess == None):
+            if (xunit=='temp'):
+                guess = [0.008,16,0.121,0.0]
+            if (xunit=='freq'):
+                guess = [0.008,389.3,0.1,0.0]
+        else:
+            guess = guess
 
         normalized_data = self.Y / ref.Y
+        self._normalized_data = normalized_data
+        absorption_data = -np.log(normalized_data)
             
         #fit data
         abs_fitter = fitt.AbsorptiveLorentzianFitter()
-        fit_result = abs_fitter.fit( self.X(xunit).m, (normalized_data).m, guess=guess)
+        fit_result = abs_fitter.fit( self.X(xunit).m, (absorption_data).m, guess=guess)
+        self._fit_xunit = xunit
         xmax = np.max(self.X(xunit))
         xmin = np.min(self.X(xunit))
         x_step = (xmax - xmin) / 200
@@ -146,62 +166,88 @@ class absorption_data():
         fit_params = fit_result.fit_parameters
         fit_params['C'] = fit_params.pop('Offset')
         #plot data
-        ax.plot(self.X(xunit).m, (normalized_data.m), label=dlabel,marker='o')
+        ax.plot(self.X(xunit).m, (absorption_data.m), label=dlabel,marker='o')
         ax.plot(self.X(xunit).m, fit_result._fit_function(self.X(xunit).m,**fit_params), label=flabel)
 
         #if(excluded_data):
         #    ax.errorbar(self._excludedPower.m, self._excludedR.m,
        #                 marker='^', ls='none', label='excluded data')
-        ax.set_xlabel('Pump Power [mW]')
-        ax.set_ylabel('Optical Rotation')
-        ax.set_title('Raw Measurements and Fit')
+        if (xunit == 'temp'):
+            ax.set_xlabel('Probe Temperature [degC]')
+        if (xunit == 'freq'):
+            ax.set_xlabel('Probe frequency [{}]'.format(self.X(xunit).u))
+        ax.set_ylabel('Absorption')
+        ax.set_title(tlabel)
         ax.legend()
 
+        self._fit_params = fit_params
         self._fit_result = fit_result
         
-def absorption(fit_result):
-    """
-    given a absorption spectrum fit result, use the fit parameters to estimate the absorption of this signal,
-    a nominal improvement over just taking the absorption = log(data.min/data.max).
-
-    returns absorption, unitless
+    def absorption(self):
+        """
+        given a absorption spectrum fit result, use the fit parameters to estimate the absorption of this signal,
+        a nominal improvement over just taking the absorption = log(data.min/data.max).
     
-    """
-    A = fit_result.fit_parameters['A']
-    f0 = fit_result.fit_parameters['f0']
-    HWHM = fit_result.fit_parameters['HWHM']
-    Offset = fit_result.fit_parameters['Offset']
-    absorption = (A / HWHM) - A * HWHM / (f0**2 + HWHM**2)
-
-    return absorption
-
-def cross_section(HWHM, transition):
-    """
-    Given a absorption spectrum's HWHM, and a particular transition with a known oscillator strength,
-    this method computes the absorption cross section.
-    
-    Parameters
-    ----------
-    HWHM : float or ureg.Quantity, optional
-        half width half max of absorption signal, assumed to be in THz
-    transition: string
-        options include 'K/D1' or 'Rb/4S_4P0.5'
-
-    Returns
-    -------
-    cs : ureg.Quantity
-        absorption cross section in units of cm**2
+        returns absorption, unitless
         
-    """
-    HWHM = default_unit(HWHM, ureg.THz).to(ureg.THz)
-    if transition == 'K/D1':
-        f_osc = 0.338
-    if transition == 'Rb/4S_4P0.5':
-        f_osc = 0.004
-    cs = (c * r_e * f_osc / HWHM).to(ureg.cm**2)
-    return cs
+        """
+        A = self._fit_params['A']
+        f0 = self._fit_params['f0']
+        HWHM = self._fit_params['HWHM']
+        Offset = self._fit_params['C']
+        absorption = (A / HWHM) - A * HWHM / (f0**2 + HWHM**2)
+    
+        return absorption
 
-def potassium_density(T):
+    def cross_section(self):
+        """
+        Given a absorption spectrum's HWHM, and a particular transition with a known oscillator strength,
+        this method computes the absorption cross section.
+        
+        Parameters
+        ----------
+        HWHM : float or ureg.Quantity, optional
+            half width half max of absorption signal, assumed to be in THz
+        transition: string
+            options include 'K/D1' or 'Rb/4S_4P0.5'
+    
+        Returns
+        -------
+        cs : ureg.Quantity
+            absorption cross section in units of cm**2
+            
+        """
+        if (self._fit_xunit == 'freq'):
+            HWHM = default_unit(self._fit_result.fit_parameters['HWHM'], ureg.THz).to(ureg.THz)
+        if (self._fit_xunit == 'temp'):
+            HWHM_temp = default_unit(self._fit_result.fit_parameters['HWHM'], ureg.delta_degC).to(ureg.delta_degC)
+            HWHM =  np.abs((HWHM_temp) * self._probe_calib)
+        
+        cs = (c * r_e * self._f_osc / HWHM).to(ureg.cm**2)
+        return cs
+
+    def density(self, L, order_notation=False):
+        """
+        Given a the density of the absorption measurement
+        
+        Parameters
+        ----------
+        L : float or ureg.Quantity
+            length of optical path, defaults to ureg.cm units
+            
+        Returns
+        -------
+        density : ureg.Quantity
+            number density of atoms in units of 1/cm^3
+            
+        """
+        L = default_unit(L, ureg.cm)
+        density_K = self.absorption() / (L * self.cross_section())
+        if(order_notation):
+            return print('{:.3e}'.format(density_K))
+        return density_K.to(1/ureg.cm**3)
+
+def potassium_density(T, order_notation=False):
     """
     Returns the density of potassium at a given temperature in units of kelvin.
     Assumes that cell only has potassium.
@@ -224,4 +270,6 @@ def potassium_density(T):
     p = ureg.Quantity(10**logp, ureg.mbar)
     k_b = constants.physical_constants['Boltzmann constant'][0] * ureg.J / ureg.K
     n = p / k_b / T
+    if(order_notation):
+            return print('{:.3e}'.format(n.to(ureg.cm**-3)))
     return n.to(ureg.cm**-3)
