@@ -218,7 +218,7 @@ class absorption_data():
             
         """
         if (self._fit_xunit == 'freq'):
-            HWHM = default_unit(self._fit_result.fit_parameters['HWHM'], ureg.THz).to(ureg.THz)
+            HWHM = np.abs(default_unit(self._fit_result.fit_parameters['HWHM'], ureg.THz).to(ureg.THz))
         if (self._fit_xunit == 'temp'):
             HWHM_temp = default_unit(self._fit_result.fit_parameters['HWHM'], ureg.delta_degC).to(ureg.delta_degC)
             HWHM =  np.abs((HWHM_temp) * self._probe_calib)
