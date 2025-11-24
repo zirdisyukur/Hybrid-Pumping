@@ -105,6 +105,10 @@ class absorption_data():
     @property 
     def Y(self):
         return self._Power
+
+    @property
+    def fit_params(self):
+        return self._fit_params
         
     def X(self, unit='temp'):
         """
